@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-#@author Sean Lucas
+#@author Sean Lucas, Sophia Dykstra
 #@category Analysis
 #@keybinding
 #@menupath Tools.RiskyFunctionAnalyzer
@@ -13,12 +13,35 @@ from ghidra.program.model.listing import CodeUnit
 from java.io import FileWriter
 
 listing = currentProgram.getListing()
+RISKY_SUBSTRINGS = ["strcpy", "strcat", "sprintf", "memcpy", "gets", "scanf", "alloc", "malloc", "free", "realloc"]
 
-RISKY_SUBSTRINGS = ["strcpy", "strcat", "sprintf", "memcpy", "alloc", "malloc", "free", "realloc", "gets", "scanf"]
+FORMAT_FUNCS = ["printf", "fprintf", "sprintf", "snprintf", "vprintf", "vsprintf"]
+BUFFER_KEYWORDS = ["char ", "char[", "buffer", "buf"]
+UNSAFE_PATTERNS = ["[", "]", "=", "+", "-"]
 
 def is_risky_function(name):
     name_lower = name.lower()
     return any(substr in name_lower for substr in RISKY_SUBSTRINGS)
+
+def is_format_string_vuln(decompiled_code):
+    for line in decompiled_code.splitlines():
+        for fmt in FORMAT_FUNCS:
+            if fmt in line and '(' in line:
+                args = line.split(fmt)[1]
+                if not ("\"" in args.split(",")[0]):
+                    return True
+    return False
+
+def buffer_overflow_heuristic(decompiled_code):
+    stack_allocs = [line.strip() for line in decompiled_code.splitlines() if any(kw in line for kw in BUFFER_KEYWORDS)]
+    possible_overflows = []
+
+    for decl in stack_allocs:
+        var_name = decl.split()[-1].replace(";", "").replace("]", "").split("[")[0]
+        if any(op in decl for op in UNSAFE_PATTERNS):
+            possible_overflows.append(decl)
+
+    return possible_overflows
 
 def analyze_program():
     fm = currentProgram.getFunctionManager()
@@ -37,17 +60,25 @@ def analyze_program():
 
         if is_risky_function(fname):
             reasons.append("Name matches risky pattern")
-            listing.setComment(func.getEntryPoint(), CodeUnit.PLATE_COMMENT, "Risky function: " + fname)
+            listing.setComment(func.getEntryPoint(), CodeUnit.PLATE_COMMENT, "risky function: " + fname)
             func.setName("RISKY_" + fname, SourceType.USER_DEFINED)
 
         results = decompiler.decompileFunction(func, 30, monitor)
         if results and results.decompileCompleted():
             decompiled_code = results.getDecompiledFunction().getC()
+
             for keyword in RISKY_SUBSTRINGS:
                 if keyword in decompiled_code:
-                    reasons.append("Decompiled code uses: " + keyword)
-                    listing.setComment(func.getEntryPoint(), CodeUnit.PLATE_COMMENT, "Uses risky operation: " + keyword)
+                    reasons.append("decompiled code uses: " + keyword)
+                    listing.setComment(func.getEntryPoint(), CodeUnit.PLATE_COMMENT, "uses risky operation: " + keyword)
                     break
+
+            if is_format_string_vuln(decompiled_code):
+                reasons.append("potential format string vulnerability")
+
+            buf_overflows = buffer_overflow_heuristic(decompiled_code)
+            if buf_overflows:
+                reasons.append("potential buffer overflow risk (stack): " + ", ".join(buf_overflows[:2]))
 
         if reasons:
             risky_funcs[func] = reasons
@@ -89,6 +120,7 @@ def generate_risk_report(risky_funcs, call_edges):
                 f.write("    Called by: {}\n".format(", ".join(callers)))
             f.write("\n")
     print("[+] Exported risk report to: {}".format(report_path))
+
 def compute_risk_score(risky_funcs, call_edges, total_funcs):
     if total_funcs == 0:
         return 0, "No functions in binary."
@@ -129,10 +161,9 @@ def compute_risk_score(risky_funcs, call_edges, total_funcs):
 # Run all
 risky_funcs, call_edges = analyze_program()
 export_call_graph(risky_funcs, call_edges)
-generate_risk_report(risky_funcs, call_edges)    
+generate_risk_report(risky_funcs, call_edges)
+
 total_funcs = currentProgram.getFunctionManager().getFunctionCount()
 score, explanation = compute_risk_score(risky_funcs, call_edges, total_funcs)
-
 print("=== Vulnerability Score: {}/100 ===".format(score))
 print(explanation)
-
