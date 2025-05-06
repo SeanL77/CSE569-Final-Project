@@ -1,0 +1,57 @@
+{
+  "firmware_type": "generic",
+  "analysis_modules": [
+    "buffer_overflow",
+    "insecure_functions",
+    "hardcoded_credentials",
+    "taint",
+    "control_logic_analyzer",
+    "firmware_specific_analyzer",
+    "ioc_detector",
+    "privilege_escalation_detector"
+  ],
+  "firmware_specific_settings": {
+    "plc": {
+      "modbus_functions": true,
+      "ladder_logic_extraction": true,
+      "timeout_controls": true
+    },
+    "iot": {
+      "mqtt_analysis": true,
+      "wireless_security": true,
+      "authentication_checks": true 
+    },
+    "scada": {
+      "dnp3_analysis": true,
+      "authentication_bypass": true,
+      "command_injection": true
+    },
+    "generic": {
+      "command_injection": true,
+      "authentication_bypass": true
+    }
+  },
+  "reporting": {
+    "output_format": "json",
+    "output_directory": "./reports",
+    "include_code_snippets": true,
+    "max_results_per_category": 100
+  },
+  "taint_settings": {
+    "sources": [
+      "recv", "read", "fgets", "getchar", "scanf", 
+      "modbus_receive", "dnp3_read", "canbus_read", 
+      "mqtt_subscribe", "serial_read"
+    ],
+    "sinks": [
+      "strcpy", "strcat", "sprintf", "gets", "memcpy",
+      "system", "exec", "popen", "send_command", "write_register"
+    ]
+  },
+  "credential_settings": {
+    "patterns": [
+      "password", "passwd", "pwd", "secret", "key",
+      "credential", "token", "auth", "apikey", "api_key"
+    ]
+  }
+} 
